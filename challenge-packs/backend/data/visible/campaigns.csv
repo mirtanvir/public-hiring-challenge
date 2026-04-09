@@ -1,0 +1,4 @@
+campaign_id,campaign_name,brand,status
+cmp-001,Spring Launch,Aster,active
+cmp-002,Holiday Push,Beacon,paused
+cmp-003,Retention Blitz,Cinder,active

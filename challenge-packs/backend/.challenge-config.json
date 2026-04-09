@@ -1,0 +1,7 @@
+{
+  "challenge_type": "backend",
+  "challenge_label": "Backend Engineer",
+  "repo_prefix": "backend-challenge",
+  "grader_repo": "private-hiring-challenge-sandbox",
+  "grade_event_type": "grade-backend-submission"
+}

@@ -1,0 +1,58 @@
+name: Handle Submission
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  submission-status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load challenge config
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONFIG=.challenge-config.json
+          echo "challenge_type=$(jq -r '.challenge_type' "$CONFIG")" >> "$GITHUB_OUTPUT"
+          echo "challenge_label=$(jq -r '.challenge_label' "$CONFIG")" >> "$GITHUB_OUTPUT"
+          echo "repo_prefix=$(jq -r '.repo_prefix' "$CONFIG")" >> "$GITHUB_OUTPUT"
+          echo "grader_repo=$(jq -r '.grader_repo' "$CONFIG")" >> "$GITHUB_OUTPUT"
+          echo "grade_event_type=$(jq -r '.grade_event_type' "$CONFIG")" >> "$GITHUB_OUTPUT"
+
+      - name: Count candidate PRs against main
+        id: pr_count
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              base: 'main',
+              state: 'all',
+            });
+            core.setOutput('count', String(prs.length));
+
+      - name: Create pending status comment
+        uses: actions/github-script@v7
+        env:
+          CHALLENGE_LABEL: ${{ steps.config.outputs.challenge_label }}
+        with:
+          script: |
+            const prCount = parseInt('${{ steps.pr_count.outputs.count }}', 10);
+            const challenge = process.env.CHALLENGE_LABEL;
+            const attempt = `(attempt ${prCount} of 2)`;
+            const body = prCount >= 2
+              ? `⏳ **${challenge} submission received** ${attempt} — grading will be picked up by the central grader shortly.\n\n🔒 This is your final submission. Repository access may be set to read-only by the grading platform.`
+              : `⏳ **${challenge} submission received** ${attempt} — grading will be picked up by the central grader shortly.\n\n💡 You will have one more attempt after this if needed.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });
