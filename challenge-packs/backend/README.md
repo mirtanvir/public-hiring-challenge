@@ -34,6 +34,52 @@ Behavior contract:
 - `GET /campaigns/{campaign_id}/anomalies` should call the benchmark service, compare daily rollups against benchmark thresholds, and return meaningful alerts.
 - Downstream benchmark failures should be surfaced as a backend error response, not silently ignored.
 
+Expected response contract:
+
+- `GET /health` should return at least:
+  - `status`: `"ok"` when all dependencies are reachable, otherwise `"degraded"`
+  - `database`: `"ok"` or `"error"`
+  - `benchmark_service`: `"ok"`, `"fixture"`, or `"error"`
+  - `dataset`: the active dataset name if one is configured
+- `GET /campaigns/{campaign_id}/performance` should return:
+  - top-level `campaign_id` and `campaign_name`
+  - `totals.total_impressions`
+  - `totals.total_clicks`
+  - `totals.total_conversions`
+  - `totals.total_spend`
+  - `totals.total_revenue`
+  - `totals.ctr`
+  - `totals.cvr`
+  - `totals.roas`
+- `GET /creators/top` should return top-level `campaign_id`, `limit`, and a `creators` array.
+- `GET /campaigns/{campaign_id}/anomalies` should return top-level `campaign_id`, `thresholds`, and an `alerts` array. Each alert should include `metric_date`, `issues`, `ctr`, and `roas`.
+
+Metric rules:
+
+- `ctr` is `total_clicks / total_impressions`.
+- `cvr` is `total_conversions / total_clicks`.
+- `roas` is `total_revenue / total_spend`.
+- Round derived rates to 4 decimal places and money totals to 2 decimal places.
+- Treat null revenue as `0` for aggregate totals and ROAS.
+- Use safe division for zero denominators. Do not crash or fabricate infinite values.
+- A missing campaign should return a clear `404`.
+
+Creator ranking rules:
+
+- Rank creators by total conversions descending.
+- Break ties by total clicks descending.
+- Break remaining ties by `creator_id` ascending for deterministic output.
+- Honor `limit`, including values other than the visible sample default.
+
+Anomaly rules:
+
+- Roll up metrics by day before comparing to thresholds.
+- A single day may have multiple issues.
+- Include `ctr_below_threshold` when daily CTR is below `min_ctr`.
+- Include `roas_below_threshold` when daily ROAS is below `min_roas`.
+- Include `spend_without_conversions` when daily spend is positive and daily conversions are zero.
+- Campaigns with no threshold violations should return an empty `alerts` array.
+
 ### 2. SQL Analytics
 
 **Files:** `sql/campaign_performance.sql`, `sql/top_creators.sql`, `sql/daily_anomalies.sql`
@@ -48,7 +94,7 @@ Your fixes should be robust to:
 - campaigns that should return no anomalies
 - campaigns that should produce multiple anomaly reasons on the same day
 
-Do not hardcode results from the visible sample data. The grader runs your SQL against additional hidden datasets.
+Do not hardcode results from the visible sample data. The grader runs your SQL against additional hidden datasets with the same contract but different values and edge cases.
 
 ### 3. Tests
 
@@ -58,9 +104,10 @@ The provided tests are incomplete. You should make them pass and improve the sui
 
 At minimum, your final tests should cover:
 
-- one happy-path analytics response
-- one ranking/limit case
-- at least one non-happy-path behavior such as downstream failure handling or an edge-case dataset condition
+- one complete campaign performance response, including all totals and derived rates
+- one ranking/limit case that proves deterministic creator ordering
+- at least one anomaly case with threshold violations
+- at least one non-happy-path behavior such as missing campaigns, downstream failure handling, zero-denominator data, or a campaign with no anomalies
 
 ### 4. Packaging
 
