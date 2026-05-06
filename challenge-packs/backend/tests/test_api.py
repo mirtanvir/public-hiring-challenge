@@ -10,6 +10,7 @@ def build_client():
     os.environ["BENCHMARK_FIXTURES_FILE"] = os.path.join(
         os.getcwd(), "data", "visible", "benchmarks.json"
     )
+    os.environ.pop("BENCHMARK_API_BASE", None)
     return TestClient(create_app())
 
 
@@ -55,12 +56,44 @@ def test_top_creators_honors_limit_and_order():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["campaign_id"] == "cmp-001"
-    assert payload["limit"] == 2
-    assert [row["creator_id"] for row in payload["creators"]] == ["crt-001", "crt-002"]
-    assert payload["creators"][0]["total_conversions"] == 12
-    assert payload["creators"][0]["total_clicks"] == 110
-    assert payload["creators"][0]["ctr"] == 0.05
+    assert payload == {
+        "campaign_id": "cmp-001",
+        "limit": 2,
+        "creators": [
+            {
+                "campaign_id": "cmp-001",
+                "creator_id": "crt-001",
+                "creator_name": "Avery",
+                "total_impressions": 2200,
+                "total_clicks": 110,
+                "total_conversions": 12,
+                "total_spend": 420.0,
+                "ctr": 0.05,
+            },
+            {
+                "campaign_id": "cmp-001",
+                "creator_id": "crt-002",
+                "creator_name": "Blake",
+                "total_impressions": 2000,
+                "total_clicks": 70,
+                "total_conversions": 6,
+                "total_spend": 350.0,
+                "ctr": 0.035,
+            },
+        ],
+    }
+
+
+def test_top_creators_breaks_ties_by_creator_id_after_conversions_and_clicks():
+    client = build_client()
+
+    response = client.get("/creators/top", params={"campaign_id": "cmp-004", "limit": 2})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [row["creator_id"] for row in payload["creators"]] == ["crt-003", "crt-004"]
+    assert [row["total_conversions"] for row in payload["creators"]] == [3, 3]
+    assert [row["total_clicks"] for row in payload["creators"]] == [30, 30]
 
 
 def test_anomalies_returns_threshold_violations_with_expected_shape():
@@ -70,14 +103,34 @@ def test_anomalies_returns_threshold_violations_with_expected_shape():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["campaign_id"] == "cmp-002"
-    assert payload["thresholds"] == {"min_ctr": 0.03, "min_roas": 2.5}
+    assert payload == {
+        "campaign_id": "cmp-002",
+        "thresholds": {"min_ctr": 0.03, "min_roas": 2.5},
+        "alerts": [
+            {
+                "metric_date": "2026-01-03",
+                "issues": ["ctr_below_threshold", "roas_below_threshold"],
+                "ctr": 0.0263,
+                "roas": 2.2059,
+            }
+        ],
+    }
+
+
+def test_anomalies_supports_spend_without_conversions():
+    client = build_client()
+
+    response = client.get("/campaigns/cmp-005/anomalies")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["thresholds"] == {"min_ctr": 0.03, "min_roas": 1.0}
     assert payload["alerts"] == [
         {
-            "metric_date": "2026-01-03",
-            "issues": ["ctr_below_threshold", "roas_below_threshold"],
-            "ctr": 0.0263,
-            "roas": 2.2059,
+            "metric_date": "2026-01-06",
+            "issues": ["roas_below_threshold", "spend_without_conversions"],
+            "ctr": 0.05,
+            "roas": 0.0,
         }
     ]
 
@@ -91,3 +144,14 @@ def test_anomalies_returns_empty_alerts_when_no_thresholds_are_violated():
     payload = response.json()
     assert payload["campaign_id"] == "cmp-003"
     assert payload["alerts"] == []
+
+
+def test_anomalies_benchmark_service_unreachable():
+    os.environ["DATA_DIR"] = os.path.join(os.getcwd(), "data", "visible")
+    os.environ.pop("BENCHMARK_FIXTURES_FILE", None)
+    os.environ["BENCHMARK_API_BASE"] = "http://localhost:19999"
+    client = TestClient(create_app())
+
+    response = client.get("/campaigns/cmp-001/anomalies")
+
+    assert response.status_code == 502

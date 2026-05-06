@@ -10,5 +10,13 @@
   "cmp-003": {
     "min_ctr": 0.02,
     "min_roas": 1.0
+  },
+  "cmp-004": {
+    "min_ctr": 0.03,
+    "min_roas": 2.5
+  },
+  "cmp-005": {
+    "min_ctr": 0.03,
+    "min_roas": 1.0
   }
 }

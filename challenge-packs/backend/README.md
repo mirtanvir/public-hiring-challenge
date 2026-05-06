@@ -34,28 +34,54 @@ Behavior contract:
 - `GET /campaigns/{campaign_id}/anomalies` should call the benchmark service, compare daily rollups against benchmark thresholds, and return meaningful alerts.
 - Downstream benchmark failures should be surfaced as a backend error response, not silently ignored.
 
-Expected response contract:
+#### API Response Contract
 
-- `GET /health` should return at least:
-  - `status`: `"ok"` when all dependencies are reachable, otherwise `"degraded"`
-  - `database`: `"ok"` or `"error"`
-  - `benchmark_service`: `"ok"`, `"fixture"`, or `"error"`
-  - `dataset`: the active dataset name if one is configured
-- `GET /campaigns/{campaign_id}/performance` should return:
-  - top-level `campaign_id` and `campaign_name`
-  - `totals.total_impressions`
-  - `totals.total_clicks`
-  - `totals.total_conversions`
-  - `totals.total_spend`
-  - `totals.total_revenue`
-  - `totals.ctr`
-  - `totals.cvr`
-  - `totals.roas`
-- `GET /creators/top` should return top-level `campaign_id`, `limit`, and a `creators` array.
-- `GET /campaigns/{campaign_id}/anomalies` should return top-level `campaign_id`, `thresholds`, and an `alerts` array. Each alert should include `metric_date`, `issues`, `ctr`, and `roas`.
+Use these endpoint contracts as the expected public behavior for the visible sample data. The grader also runs hidden datasets, so the exact values below are examples, not the only cases your code must handle.
 
-Metric rules:
+##### `GET /health`
 
+Expected minimum shape:
+
+```json
+{
+  "status": "ok",
+  "database": "ok",
+  "benchmark_service": "fixture",
+  "dataset": "visible"
+}
+```
+
+Rules:
+
+- `status` should be `"ok"` when dependencies are reachable, otherwise `"degraded"`.
+- `database` should be `"ok"` or `"error"`.
+- `benchmark_service` should be `"ok"`, `"fixture"`, or `"error"`.
+- `dataset` should identify the active dataset when one is configured.
+
+##### `GET /campaigns/{campaign_id}/performance`
+
+Expected shape for `cmp-001` in the visible sample data:
+
+```json
+{
+  "campaign_id": "cmp-001",
+  "campaign_name": "Spring Launch",
+  "totals": {
+    "total_impressions": 5000,
+    "total_clicks": 212,
+    "total_conversions": 21,
+    "total_spend": 890.0,
+    "total_revenue": 3230.0,
+    "ctr": 0.0424,
+    "cvr": 0.0991,
+    "roas": 3.6292
+  }
+}
+```
+
+Rules:
+
+- Return a single aggregated record for the requested campaign.
 - `ctr` is `total_clicks / total_impressions`.
 - `cvr` is `total_conversions / total_clicks`.
 - `roas` is `total_revenue / total_spend`.
@@ -64,14 +90,73 @@ Metric rules:
 - Use safe division for zero denominators. Do not crash or fabricate infinite values.
 - A missing campaign should return a clear `404`.
 
-Creator ranking rules:
+##### `GET /creators/top?campaign_id=...&limit=...`
+
+Expected shape for `campaign_id=cmp-001&limit=2` in the visible sample data:
+
+```json
+{
+  "campaign_id": "cmp-001",
+  "limit": 2,
+  "creators": [
+    {
+      "campaign_id": "cmp-001",
+      "creator_id": "crt-001",
+      "creator_name": "Avery",
+      "total_impressions": 2200,
+      "total_clicks": 110,
+      "total_conversions": 12,
+      "total_spend": 420.0,
+      "ctr": 0.05
+    },
+    {
+      "campaign_id": "cmp-001",
+      "creator_id": "crt-002",
+      "creator_name": "Blake",
+      "total_impressions": 2000,
+      "total_clicks": 70,
+      "total_conversions": 6,
+      "total_spend": 350.0,
+      "ctr": 0.035
+    }
+  ]
+}
+```
+
+Rules:
 
 - Rank creators by total conversions descending.
 - Break ties by total clicks descending.
 - Break remaining ties by `creator_id` ascending for deterministic output.
 - Honor `limit`, including values other than the visible sample default.
+- The visible sample includes `cmp-004` to make deterministic tie-breaking testable.
 
-Anomaly rules:
+##### `GET /campaigns/{campaign_id}/anomalies`
+
+Expected shape for `cmp-002` in the visible sample data:
+
+```json
+{
+  "campaign_id": "cmp-002",
+  "thresholds": {
+    "min_ctr": 0.03,
+    "min_roas": 2.5
+  },
+  "alerts": [
+    {
+      "metric_date": "2026-01-03",
+      "issues": [
+        "ctr_below_threshold",
+        "roas_below_threshold"
+      ],
+      "ctr": 0.0263,
+      "roas": 2.2059
+    }
+  ]
+}
+```
+
+Rules:
 
 - Roll up metrics by day before comparing to thresholds.
 - A single day may have multiple issues.
@@ -79,12 +164,20 @@ Anomaly rules:
 - Include `roas_below_threshold` when daily ROAS is below `min_roas`.
 - Include `spend_without_conversions` when daily spend is positive and daily conversions are zero.
 - Campaigns with no threshold violations should return an empty `alerts` array.
+- Include the threshold values used to evaluate the response.
+- If the benchmark service is unavailable or returns an invalid downstream response, surface that as `502`.
 
 ### 2. SQL Analytics
 
 **Files:** `sql/campaign_performance.sql`, `sql/top_creators.sql`, `sql/daily_anomalies.sql`
 
 These queries are intentionally wrong.
+
+Expected SQL output schemas:
+
+- `campaign_performance.sql` takes one parameter, `campaign_id`, and returns one row with columns: `campaign_id`, `campaign_name`, `total_impressions`, `total_clicks`, `total_conversions`, `total_spend`, `total_revenue`, `ctr`, `cvr`, `roas`.
+- `top_creators.sql` takes two parameters, `campaign_id` and `limit`, and returns rows with columns: `campaign_id`, `creator_id`, `creator_name`, `total_impressions`, `total_clicks`, `total_conversions`, `total_spend`, `ctr`.
+- `daily_anomalies.sql` takes one parameter, `campaign_id`, and returns one row per metric day with columns: `metric_date`, `total_impressions`, `total_clicks`, `total_conversions`, `total_spend`, `total_revenue`, `ctr`, `roas`.
 
 Your fixes should be robust to:
 
@@ -106,7 +199,7 @@ At minimum, your final tests should cover:
 
 - one complete campaign performance response, including all totals and derived rates
 - one ranking/limit case that proves deterministic creator ordering
-- at least one anomaly case with threshold violations
+- at least one anomaly payload case that includes `thresholds` and expected `issues` values
 - at least one non-happy-path behavior such as missing campaigns, downstream failure handling, zero-denominator data, or a campaign with no anomalies
 
 ### 4. Packaging
@@ -127,6 +220,18 @@ Fill in the template with a short explanation of:
 - which edge cases you handled
 - what tests you added or improved
 - any tradeoffs you made
+
+## Tooling Guidance
+
+You are welcome to use a coding agent or AI assistant during this challenge. We are evaluating the quality of your engineering decisions, correctness, debugging, testing, and final implementation, not whether you avoided modern tools.
+
+If you do use a coding agent, include a short summary in `DECISIONS.md` covering:
+
+- whether you used one
+- which parts of the challenge it helped with
+- any suggestions you rejected, corrected, or rewrote
+
+Do not paste the full conversation transcript into the repository or PR. A concise summary of how you used the tool is more useful than raw chat logs.
 
 ## Local Development
 
