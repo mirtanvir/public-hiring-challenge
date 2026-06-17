@@ -2,6 +2,6 @@
   "challenge_type": "devops",
   "challenge_label": "DevOps Engineer",
   "repo_prefix": "devops-challenge",
-  "grader_repo": "private-hiring-challenge-sandbox",
+  "grader_repo": "private-hiring-challenge",
   "grade_event_type": "grade-devops-submission"
 }
